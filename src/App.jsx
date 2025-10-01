@@ -6,23 +6,54 @@ import { getBotResponse } from "./ai";
 export default function App() {
   const [darkMode, setDarkMode] = useState(false);
 
-  // Чат
+  // 🔹 Чат
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [isBotTyping, setIsBotTyping] = useState(false);
+  const [chatMode, setChatMode] = useState("default"); // режим: default | speedrun | mix | random
   const messagesEndRef = useRef(null);
 
-  // Плейлист задач
+  // 🔹 Плейлист задач
   const [tasks, setTasks] = useState([]);
   const [inputTask, setInputTask] = useState("");
   const [newTaskIds, setNewTaskIds] = useState([]);
   const [currentTaskIndex, setCurrentTaskIndex] = useState(null);
 
-  // Таймер
+  // 🔹 Таймер
   const initialTime = 25 * 60;
   const [time, setTime] = useState(initialTime);
   const [isRunning, setIsRunning] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+
+
+    // =====================
+  // 🗂 Сохранение истории
+  // =====================
+  const [initialized, setInitialized] = useState(false);
+
+  // Загружаем при старте
+  useEffect(() => {
+    const savedMessages = localStorage.getItem("messages");
+    const savedTasks = localStorage.getItem("tasks");
+    if (savedMessages) setMessages(JSON.parse(savedMessages));
+    if (savedTasks) setTasks(JSON.parse(savedTasks));
+    setInitialized(true); // только после загрузки
+  }, []);
+
+  // Сохраняем при изменениях (только после инициализации)
+  useEffect(() => {
+    if (initialized) {
+      localStorage.setItem("messages", JSON.stringify(messages));
+    }
+  }, [messages, initialized]);
+
+  useEffect(() => {
+    if (initialized) {
+      localStorage.setItem("tasks", JSON.stringify(tasks));
+    }
+  }, [tasks, initialized]);
+
+
 
   // Автопрокрутка чата
   useEffect(() => {
@@ -142,32 +173,56 @@ export default function App() {
 
   // ===== Чат =====
   const sendMessage = async () => {
-    if (!chatInput.trim()) return;
-    const userMessage = { sender: "user", text: chatInput };
-    setMessages((prev) => [...prev, userMessage]);
-    setChatInput("");
+  if (!chatInput.trim()) return;
 
-    setIsBotTyping(true);
-    try {
-      const reply = await getBotResponse(userMessage.text || "");
-      const hasList = /\n\s*[-*]\s+|\n\s*\d+\./.test(reply);
-      setMessages((prev) => [
-        ...prev,
-        { sender: "bot", text: reply, withList: hasList },
-      ]);
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "bot",
-          text: "Извините, ошибка AI. Попробуйте позже.",
-          withList: false,
-        },
-      ]);
-    } finally {
-      setIsBotTyping(false);
+  const userMessage = { sender: "user", text: chatInput };
+  setMessages((prev) => [...prev, userMessage]);
+  setChatInput("");
+
+  setIsBotTyping(true);
+
+  try {
+    // 🔹 Генерируем подсказку в зависимости от режима
+    let modePrompt = "";
+    switch (chatMode) {
+      case "speedrun":
+        modePrompt = "Отвечай максимально кратко и по делу. Формат: список шагов без пояснений.";
+        break;
+      case "mix":
+        modePrompt = "Дай и быстрые шаги, и краткий совет, в одном ответе.";
+        break;
+      case "random":
+        modePrompt = "Ответь нестандартно, добавь юмора или неожиданный подход.";
+        break;
+      default:
+        modePrompt = "Дай развернутый, полезный и структурированный ответ.";
     }
-  };
+
+    const fullPrompt = `${modePrompt}\n\nВопрос: ${userMessage.text}`;
+
+    // 🔹 Отправляем в ИИ
+    const reply = await getBotResponse(fullPrompt);
+
+    const hasList = /\n\s*[-*]\s+|\n\s*\d+\./.test(reply);
+    setMessages((prev) => [
+      ...prev,
+      { sender: "bot", text: reply, withList: hasList },
+    ]);
+  } catch (err) {
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "bot",
+        text: "Извините, ошибка AI. Попробуйте позже.",
+        withList: false,
+      },
+    ]);
+  } finally {
+    setIsBotTyping(false);
+  }
+};
+
+
 
   const handleChatKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -210,55 +265,80 @@ export default function App() {
           <div className="grid grid-cols-2 gap-8">
             {/* Левая часть: чат + задачи */}
             <div className="flex flex-col gap-8">
-              {/* Чат */}
-              <div className="bg-white/90 dark:bg-gray-800 backdrop-blur-sm p-5 rounded-2xl shadow-lg border border-purple-200 dark:border-gray-700 flex flex-col h-[480px]">
-                <h2 className="text-lg font-bold mb-3 text-purple-600 dark:text-purple-300">
-                  💬 Чат
-                </h2>
-                <div className="flex-1 overflow-y-auto space-y-4 mb-3 pr-2">
-                  {messages.map((msg, idx) => (
-                    <div key={idx} className="space-y-1">
-                      <motion.div
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className={`px-3 py-2 rounded-2xl max-w-[80%] ${
-                          msg.sender === "user"
-                            ? "bg-purple-500 text-white self-end ml-auto"
-                            : "bg-gray-200 dark:bg-gray-700 dark:text-gray-200 text-gray-800 self-start"
-                        }`}
-                      >
-                        <ReactMarkdown>{msg.text}</ReactMarkdown>
-                      </motion.div>
-                      {msg.sender === "bot" && msg.withList && (
-                        <button
-                          onClick={() => addTasksFromText(msg.text)}
-                          className="ml-2 text-sm px-2 py-1 rounded-lg bg-green-500 text-white hover:bg-green-600 transition"
-                        >
-                          ➕ Добавить в задачи
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {isBotTyping && <TypingIndicator />}
-                  <div ref={messagesEndRef} />
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={handleChatKeyDown}
-                    placeholder="Напиши что-нибудь..."
-                    className="flex-1 border rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
-                  />
-                  <button
-                    onClick={sendMessage}
-                    className="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition"
-                  >
-                    ➤
-                  </button>
-                </div>
-              </div>
+              {/* 🔹 Чат с режимами */}
+<div className="bg-white/90 dark:bg-gray-800 backdrop-blur-sm p-5 rounded-2xl shadow-lg border border-purple-200 dark:border-gray-700 flex flex-col h-[520px]">
+  <h2 className="text-lg font-bold mb-3 text-purple-600 dark:text-purple-300">
+    💬 Чат
+  </h2>
+
+  {/* 🔹 Переключатель режимов */}
+  <div className="flex gap-2 mb-3">
+    {["default", "speedrun", "mix", "random"].map((mode) => (
+      <button
+        key={mode}
+        onClick={() => setChatMode(mode)}
+        className={`px-3 py-1 rounded-lg text-sm transition ${
+          chatMode === mode
+            ? "bg-purple-500 text-white"
+            : "bg-gray-200 dark:bg-gray-700 dark:text-gray-300 hover:bg-purple-200 dark:hover:bg-gray-600"
+        }`}
+      >
+        {mode === "default" && "✨ Обычный"}
+        {mode === "speedrun" && "⚡ Спидран"}
+        {mode === "mix" && "🎲 Смешанный"}
+        {mode === "random" && "🤯 Рандом"}
+      </button>
+    ))}
+  </div>
+
+  {/* 🔹 Сообщения */}
+  <div className="flex-1 overflow-y-auto space-y-4 mb-3 pr-2">
+    {messages.map((msg, idx) => (
+      <div key={idx} className="space-y-1">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`px-3 py-2 rounded-2xl max-w-[80%] ${
+            msg.sender === "user"
+              ? "bg-purple-500 text-white self-end ml-auto"
+              : "bg-gray-200 dark:bg-gray-700 dark:text-gray-200 text-gray-800 self-start"
+          }`}
+        >
+          <ReactMarkdown>{msg.text}</ReactMarkdown>
+        </motion.div>
+        {msg.sender === "bot" && msg.withList && (
+          <button
+            onClick={() => addTasksFromText(msg.text)}
+            className="ml-2 text-sm px-2 py-1 rounded-lg bg-green-500 text-white hover:bg-green-600 transition"
+          >
+            ➕ Добавить в задачи
+          </button>
+        )}
+      </div>
+    ))}
+    {isBotTyping && <TypingIndicator />}
+    <div ref={messagesEndRef} />
+  </div>
+
+  {/* 🔹 Ввод */}
+  <div className="flex gap-2">
+    <input
+      type="text"
+      value={chatInput}
+      onChange={(e) => setChatInput(e.target.value)}
+      onKeyDown={handleChatKeyDown}
+      placeholder="Напиши что-нибудь..."
+      className="flex-1 border rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+    />
+    <button
+      onClick={sendMessage}
+      className="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition"
+    >
+      ➤
+    </button>
+  </div>
+</div>
+
 
               {/* Плейлист задач */}
               <div className="bg-white/90 dark:bg-gray-800 backdrop-blur-sm p-5 rounded-2xl shadow-lg border border-purple-200 dark:border-gray-700 flex flex-col h-[480px]">
